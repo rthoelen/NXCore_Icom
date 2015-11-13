@@ -50,6 +50,7 @@ struct rpt {
 	unsigned int *tg_list;   // if a talkgroup isn't in this list, it isn't repeated
 	int uid; // need this for Kenwood udp 64001 data
 	int stealth; // true if keep alive needed
+	int tx_otaa; // flag for sending OTAA or blocking
 
 } *repeater;
 
@@ -138,6 +139,21 @@ void *listen_thread(void *thread_id)
 		if (buf[0] != 0x49)
 			continue;
 
+
+		// Linkup to connect Icom repeater
+		if ((buf[4] == 0x01) && (buf[5] == 0x61))
+		{
+			buf[5]++;
+			buf[37] = 0x02;
+			buf[38] = 0x4f;
+			buf[39] = 0x4b;
+			std::cout << "Sending connect string to Repeater" << std::endl;
+			sendto(socket_00, buf, recvlen, 0, (struct sockaddr *)&remaddr,
+		 		sizeof(remaddr));
+			continue;
+		}
+
+	
 		// Don't know what these are, but probably don't matter
 		if ((buf[38] == 0x00) && (buf[39] == 0x21))
 			continue;
@@ -145,7 +161,7 @@ void *listen_thread(void *thread_id)
 		if (recvlen != 102)
 			continue;
 
-                if ((buf[38] == 0x1c) && (buf[39] == 0x21)) {
+                if ((buf[38] == 0x1c) && (buf[39] == 0x21) && (buf[40] == 0x81)) {
                         buf[recvlen] = 0;
 			GID = (buf[50] << 8) + buf[51];
 			UID = (buf[48] << 8) + buf[49];
@@ -156,7 +172,6 @@ void *listen_thread(void *thread_id)
 				std::cout << "Unauthorized repeater, " << inet_ntoa(remaddr.sin_addr) << ", dropping packet" << std::endl;
 				continue;  // Throw out packet, not in our list
 			}
-		
 
 			repeater[rpt_id].uid = UID;
 
@@ -172,8 +187,8 @@ void *listen_thread(void *thread_id)
 			if(buf[45] == (char)8) // End, sent shutdown on 64001	
 			{
 				repeater[rpt_id].rx_activity = 0;    // Activity on channel is over
-				repeater[rpt_id].active_tg = 0;   
 				repeater[rpt_id].last_tg = repeater[rpt_id].active_tg;
+				GID = repeater[i].active_tg;
 				std::cout << "Repeater " << rpt_id << " receiving stop from UID: " << UID << " from TG: " << GID << std::endl;	
 			}	
 				
@@ -229,7 +244,7 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 
 	if (tg_lookup(GID, rpt_id) == -1)
 	{
-		std::cout << "Blocking TG: " << GID << " sent on Repeater " << rpt_id << " due to recent RX on TG: " << repeater[i].last_tg << std::endl;
+		std::cout << "Blocking TG: " << GID << " sent on Repeater " << rpt_id << ", unauthorized TG: " << GID << std::endl;
 		return;
 	}
 
@@ -242,6 +257,13 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 		tg = tg_lookup(GID, i);
 	 	if(tg != -1)
 		{
+
+
+			// Check if this is an OTAA packet
+
+                	if ((buf[38] == 0x1c) && (buf[39] == 0x21) && (buf[40] == 0xa0) && (repeater[i].tx_otaa == 0)) {
+				continue;
+			}
 
 			// First, if this particular repeater just had RX activity, if the packet 
 			// doesn't match the last talkgroup, drop it.  This should solve most contention
@@ -338,12 +360,13 @@ void *timing_thread(void *t_id)
 
 
 		}	
-		if((++seconds % 30) == 0 )
+		if((++seconds % 30) == 0)
 		{
 			for( i = 0; i < repeater_count; i++)
 				{
-					sendto(socket_00, h_buf, sizeof(h_buf), 0, (struct sockaddr *)&repeater[i].rpt_addr_00,
-						sizeof(repeater[i].rpt_addr_00));
+					if(repeater[i].stealth)
+						sendto(socket_00, h_buf, sizeof(h_buf), 0, (struct sockaddr *)&repeater[i].rpt_addr_00,
+							sizeof(repeater[i].rpt_addr_00));
 				}
 		}
 	        if(seconds % 900 == 0)
@@ -419,7 +442,7 @@ int main(int argc, char *argv[])
 	{
 
 		key.assign(elems[i]);
-		key.append(".ip");
+		key.append(".address");
 	
 	        memset(&hints,0, sizeof(hints));
                 hints.ai_family = AF_INET;
@@ -461,6 +484,7 @@ int main(int argc, char *argv[])
 		repeater[i].tx_hold_time = pt.get<int>(elems[i] + ".tx_hold_time");
 		repeater[i].time_since_tx = repeater[i].tx_hold_time;
 		repeater[i].stealth = pt.get<int>(elems[i] + ".stealth");
+		repeater[i].tx_otaa = pt.get<int>(elems[i] + ".tx_otaa");
 
 	}
 
