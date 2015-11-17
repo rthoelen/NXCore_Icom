@@ -55,7 +55,7 @@ struct rpt {
 
 } *repeater;
 
-char version[] = "NXCORE Manager, ICOM, version 1.0";
+char version[] = "NXCORE Manager, ICOM, version 1.1";
 char copyright[] = "Copyright (C) Robert Thoelen, 2015";
 
 
