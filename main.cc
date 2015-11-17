@@ -48,6 +48,7 @@ struct rpt {
 	unsigned int active_tg; // talkgroup currently active
 	unsigned int last_tg;  // used for talk group hold time
 	unsigned int *tg_list;   // if a talkgroup isn't in this list, it isn't repeated
+	unsigned int *tac_list; // list of tactical talkgroups
 	int uid; // need this for Kenwood udp 64001 data
 	int stealth; // true if keep alive needed
 	int tx_otaa; // flag for sending OTAA or blocking
@@ -60,6 +61,7 @@ char copyright[] = "Copyright (C) Robert Thoelen, 2015";
 
 void snd_packet(unsigned char [], int, int,int, int);
 int tg_lookup(int, int);
+int tac_lookup(int, int);
 
 
 time_t tm;
@@ -155,16 +157,14 @@ void *listen_thread(void *thread_id)
 
 	
 		// Don't know what these are, but probably don't matter
-		if ((buf[38] == 0x00) && (buf[39] == 0x21))
-			continue;
+		// if ((buf[38] == 0x00) && (buf[39] == 0x21))
+	//		continue;
 	
 		if (recvlen != 102)
 			continue;
 
                 if ((buf[38] == 0x1c) && (buf[39] == 0x21) && (buf[40] == 0x81)) {
                         buf[recvlen] = 0;
-			GID = (buf[50] << 8) + buf[51];
-			UID = (buf[48] << 8) + buf[49];
 
 			rpt_id = get_repeater_id(&remaddr);
 			if (rpt_id == -1)
@@ -173,11 +173,13 @@ void *listen_thread(void *thread_id)
 				continue;  // Throw out packet, not in our list
 			}
 
-			repeater[rpt_id].uid = UID;
 
 			if(buf[45] == (char)1) // Beginning of packets
 			{
 				repeater[rpt_id].rx_activity = 1;
+				GID = (buf[50] << 8) + buf[51];
+				UID = (buf[48] << 8) + buf[49];
+				repeater[rpt_id].uid = UID;
 				repeater[rpt_id].active_tg = GID;
 				repeater[rpt_id].busy_tg = GID;
 				strt_packet=1;
@@ -201,7 +203,7 @@ void *listen_thread(void *thread_id)
 				
 		}
                else
-		if ((buf[38] == 0x10) && (buf[39] == 0x21)) { 
+		if (((buf[38] == 0x00)||(buf[38] == 0x10)) && (buf[39] == 0x21)) { 
 
 			rpt_id = get_repeater_id(&remaddr);
 			if (rpt_id == -1)
@@ -234,12 +236,28 @@ int tg_lookup(int GID, int i)
 	}
 	return(-1);
 }
+
+int tac_lookup(int GID, int i)
+{
+        int j;
+
+        j = 0;
+
+        while (repeater[i].tac_list[j] != 0)
+        {
+                if (repeater[i].tac_list[j++] == GID)
+                        return(j-1);
+        }
+        return(-1);
+}
+
 	
 
 void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_packet)
 {
 	int i, j;
 	int tg;
+	int tac_flag;
 	in_addr_t tmp_addr;
 
 	if (tg_lookup(GID, rpt_id) == -1)
@@ -255,6 +273,8 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 			continue;
 
 		tg = tg_lookup(GID, i);
+		tac_flag = tac_lookup(GID, i);
+
 	 	if(tg != -1)
 		{
 
@@ -265,11 +285,22 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 				continue;
 			}
 
+                        // Process TAC groups first
+                        // The only way to let the TAC group(s) through is if the RX active group matches
+
+
+                        if(tac_flag != -1)
+                        {
+                                if((repeater[i].time_since_rx == repeater[i].hold_time) || (repeater[i].active_tg != GID))
+                                        continue;
+                        }
+
+
 			// First, if this particular repeater just had RX activity, if the packet 
 			// doesn't match the last talkgroup, drop it.  This should solve most contention
 			// issues
 
-	                if(repeater[i].last_tg != GID)
+	                if((repeater[i].last_tg != GID) && (tac_flag == -1))
                         {
                                 if(repeater[i].time_since_rx < repeater[i].hold_time)
                                 {
@@ -281,7 +312,8 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
                         // Next, we need to determine if we need to preempt a talkgroup
                         // Talkgroups that are on the left in the NXCore.ini list get higher priority
 
-                        if((tg_lookup(GID, i) < tg_lookup(repeater[i].busy_tg, i)) && (strt_packet ==1) && (repeater[i].tx_busy ==1))
+                        if((tg_lookup(GID, i) < tg_lookup(repeater[i].busy_tg, i)) && (strt_packet ==1) &&
+				 (repeater[i].tx_busy ==1) && (tac_flag == -1))
                         {
                                 repeater[i].busy_tg = GID;
 				std::cout << ctime(&tm) << "Overriding TG: " << repeater[i].busy_tg << "with TG: " << GID << " on Repeater " << i << std::endl;
@@ -290,7 +322,7 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 
                         // Next, if repeater is considered busy, only send the talkgroup it has been assigned
 
-                        if((repeater[i].tx_busy == 1) && (repeater[i].busy_tg!=GID))
+                        if((repeater[i].tx_busy == 1) && (repeater[i].busy_tg!=GID) && (tac_flag == -1))
                         {
                                 std::cout << ctime(&tm) << " Repeater " << i << " not geting " << GID << "due to active TX on " << repeater[i].busy_tg << std::endl;
                                 continue;
@@ -298,7 +330,7 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 
 
 			// Drop in the ran code
-			if (buf[38] == 0x1c)	
+			if ((buf[38] == 0x1c) && (buf[40] == 0x81))
 			{
 				buf[41] = (char)repeater[i].ran;
 			}
@@ -325,7 +357,6 @@ void *timing_thread(void *t_id)
 	int i;
 	unsigned int seconds = 0;
 	char h_buf[20];
-	struct addrinfo hints, *result;	
 	
 	
         memset((char *)&h_buf[0], 0, sizeof(h_buf));
@@ -369,18 +400,7 @@ void *timing_thread(void *t_id)
 							sizeof(repeater[i].rpt_addr_00));
 				}
 		}
-	        if(seconds % 900 == 0)
 
-                {
-                        memset(&hints,0, sizeof(hints));
-                        hints.ai_family = AF_INET;
-
-                        if(getaddrinfo(repeater[i].hostname, NULL, &hints, &result) == 0)
-                        {
-                                repeater[i].rpt_addr_00.sin_addr.s_addr = ((struct sockaddr_in *)(result->ai_addr))->sin_addr.s_addr;
-                        }
-
-                }
 
 		sleep(1);
 	}
@@ -391,7 +411,7 @@ void *timing_thread(void *t_id)
 
 int main(int argc, char *argv[])
 {
-    int i, j, k;
+    int i, j, len;
 
 	struct addrinfo hints, *result;
 	boost::property_tree::ptree pt;
@@ -447,7 +467,10 @@ int main(int argc, char *argv[])
 	        memset(&hints,0, sizeof(hints));
                 hints.ai_family = AF_INET;
 
-                repeater[i].hostname = (char *)pt.get<std::string>(key).c_str();
+		len = pt.get<std::string>(key).size();
+		repeater[i].hostname = (char *)calloc(1,len+1); 
+		memcpy(repeater[i].hostname,(char *)pt.get<std::string>(key).c_str(),len+1);
+
                 if(getaddrinfo(repeater[i].hostname, NULL, &hints, &result) == -1)
                 {
                         std::cout << "Error resolving " << pt.get<std::string>(key) << ", exiting" << std::endl;
@@ -477,6 +500,28 @@ int main(int argc, char *argv[])
 			std::cout << " " << repeater[i].tg_list[j];
 
 		}
+
+	        // Do the same for the tactical list
+
+                key.assign(elems[i]);
+                key.append(".tac_list");
+                tg = pt.get<std::string>(key).c_str();
+
+                boost::split(tg_elems, tg, boost::is_any_of("\t ,"), boost::token_compress_on);
+
+                repeater[i].tac_list = (unsigned int *)calloc(tg_elems.size()+1,sizeof(int));
+                std::cout << "Tactical Talkgroups " << tg_elems.size() << std::endl;
+                std::cout << "Repeater " << i << "  Tactical Talkgroups: ";
+
+                for(j = 0; j < tg_elems.size(); j++)
+                {
+                        repeater[i].tac_list[j] = atoi(tg_elems[j].c_str());
+                        std::cout << " " << repeater[i].tac_list[j];
+
+                }
+
+
+
 		std::cout << std::endl << std::endl;
 		repeater[i].ran = pt.get<int>(elems[i] + ".ran");
 		repeater[i].hold_time = pt.get<int>(elems[i] + ".rx_hold_time");
@@ -506,7 +551,15 @@ int main(int argc, char *argv[])
 
 	while(1==1)
 	{
-		sleep(1);
+		sleep(900);
+		for(i = 0; i < repeater_count; i++)
+		{
+ 			if(getaddrinfo(repeater[i].hostname, NULL, NULL, &result) == 0)
+                	{
+                        	repeater[i].rpt_addr_00.sin_addr.s_addr = ((struct sockaddr_in *)(result->ai_addr))->sin_addr.s_addr;
+                	}
+		}
+
 	}
 	pthread_exit(NULL);
 	free(repeater);
