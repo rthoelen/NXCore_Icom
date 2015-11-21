@@ -55,7 +55,7 @@ struct rpt {
 
 } *repeater;
 
-char version[] = "NXCORE Manager, ICOM, version 1.1";
+char version[] = "NXCORE Manager, ICOM, version 1.1.1";
 char copyright[] = "Copyright (C) Robert Thoelen, 2015";
 
 
@@ -64,7 +64,6 @@ int tg_lookup(int, int);
 int tac_lookup(int, int);
 
 
-time_t tm;
 int repeater_count;
 
 int socket_00;   // Sockets we use
@@ -150,6 +149,8 @@ void *listen_thread(void *thread_id)
 			buf[38] = 0x4f;
 			buf[39] = 0x4b;
 			std::cout << "Sending connect string to Repeater" << std::endl;
+			
+        		remaddr.sin_port = htons(41300);
 			sendto(socket_00, buf, recvlen, 0, (struct sockaddr *)&remaddr,
 		 		sizeof(remaddr));
 			continue;
@@ -163,7 +164,7 @@ void *listen_thread(void *thread_id)
 		if (recvlen != 102)
 			continue;
 
-                if ((buf[38] == 0x1c) && (buf[39] == 0x21) && (buf[40] == 0x81)) {
+                if ((buf[38] == 0x1c) && (buf[39] == 0x21)) {
                         buf[recvlen] = 0;
 
 			rpt_id = get_repeater_id(&remaddr);
@@ -190,7 +191,7 @@ void *listen_thread(void *thread_id)
 			{
 				repeater[rpt_id].rx_activity = 0;    // Activity on channel is over
 				repeater[rpt_id].last_tg = repeater[rpt_id].active_tg;
-				GID = repeater[i].active_tg;
+				GID = repeater[rpt_id].active_tg;
 				std::cout << "Repeater " << rpt_id << " receiving stop from UID: " << UID << " from TG: " << GID << std::endl;	
 			}	
 				
@@ -209,6 +210,8 @@ void *listen_thread(void *thread_id)
 			if (rpt_id == -1)
 				continue;  // Throw out packet, not in our list
 			
+			if (repeater[rpt_id].rx_activity == 0)
+				continue;
 
 			GID = repeater[rpt_id].active_tg;
 
@@ -304,7 +307,7 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
                         {
                                 if(repeater[i].time_since_rx < repeater[i].hold_time)
                                 {
-                                        std::cout << ctime(&tm) << "Blocking TG: " << GID << " sent on Repeater " << i << " due to recent RX on TG: " << repeater[i].last_tg << std::endl;
+                                        std::cout << "Blocking TG: " << GID << " sent on Repeater " << i << " due to recent RX on TG: " << repeater[i].last_tg << std::endl;
                                         continue;
                                 }
                         }
@@ -316,7 +319,7 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 				 (repeater[i].tx_busy ==1) && (tac_flag == -1))
                         {
                                 repeater[i].busy_tg = GID;
-				std::cout << ctime(&tm) << "Overriding TG: " << repeater[i].busy_tg << "with TG: " << GID << " on Repeater " << i << std::endl;
+				std::cout << "Overriding TG: " << repeater[i].busy_tg << "with TG: " << GID << " on Repeater " << i << std::endl;
                         }
 
 
@@ -324,7 +327,7 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 
                         if((repeater[i].tx_busy == 1) && (repeater[i].busy_tg!=GID) && (tac_flag == -1))
                         {
-                                std::cout << ctime(&tm) << " Repeater " << i << " not geting " << GID << "due to active TX on " << repeater[i].busy_tg << std::endl;
+                                std::cout << " Repeater " << i << " not geting " << GID << "due to active TX on " << repeater[i].busy_tg << std::endl;
                                 continue;
                         }
 
@@ -381,7 +384,10 @@ void *timing_thread(void *t_id)
 			repeater[i].time_since_tx++;
 
 			if(repeater[i].time_since_rx > repeater[i].hold_time)
+			{
 				repeater[i].time_since_rx = repeater[i].hold_time;
+				repeater[i].rx_activity = 0;
+			}
 
 			if(repeater[i].time_since_tx > repeater[i].tx_hold_time)
 			{
