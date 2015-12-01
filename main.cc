@@ -50,6 +50,7 @@ struct rpt {
 	unsigned int *tg_list;   // if a talkgroup isn't in this list, it isn't repeated
 	unsigned int *tac_list; // list of tactical talkgroups
 	int uid; // need this for Kenwood udp 64001 data
+	int tx_uid; // UID during transmit
 	int stealth; // true if keep alive needed
 	int tx_otaa; // flag for sending OTAA or blocking
 
@@ -148,7 +149,7 @@ void *listen_thread(void *thread_id)
 			buf[37] = 0x02;
 			buf[38] = 0x4f;
 			buf[39] = 0x4b;
-			std::cout << "Sending connect string to Repeater" << std::endl;
+			std::cout << "Sending connect string to Repeater at IP:" << inet_ntoa(remaddr.sin_addr) << std::endl;
 			
         		remaddr.sin_port = htons(41300);
 			sendto(socket_00, buf, recvlen, 0, (struct sockaddr *)&remaddr,
@@ -298,6 +299,11 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
                                         continue;
                         }
 
+			// If there is RX activity on this repeater, don't send to the repeater
+
+			if(repeater[i].rx_activity == 1)
+				continue;
+
 
 			// First, if this particular repeater just had RX activity, if the packet 
 			// doesn't match the last talkgroup, drop it.  This should solve most contention
@@ -414,6 +420,63 @@ void *timing_thread(void *t_id)
 	
 }
 
+void write_map(void)
+{
+        int i;
+
+        std::ofstream out("/usr/local/www/nginx/status-ic.json");
+
+        // Write the preamble
+
+        out << " var json1 = [ " << std::endl;
+
+        for( i = 0; i < repeater_count; i++)
+        {
+                out << " { " << std::endl;
+                // Determine what state we are in:
+
+                // Green: IDLE
+                // Red: TX
+                // Blue: RX
+
+                if (repeater[i].rx_activity == 1)
+                {
+                        out << "\"icon\" : \"http://maps.google.com/mapfiles/ms/icons/blue-dot.png\"," << std::endl;
+
+                        out << "\"contentstr\" : \"<p>RX TG: <b>" << repeater[i].active_tg << "</b><br/>RX Timer: <b>"
+                                 << repeater[i].time_since_rx << "<b/><br/>UID: <b>" << repeater[i].uid << "</b></p>\" " << std::endl;
+
+			continue;
+                }
+
+                if ((repeater[i].rx_activity == 0)&&(repeater[i].tx_busy == 0))
+                {
+                        out << "\"icon\" : \"http://maps.google.com/mapfiles/ms/icons/green-dot.png\"," << std::endl;
+
+                        out << "\"contentstr\" : \"<p>Repeater IDLE</p>\"  " << std::endl;
+			continue;	
+                }
+
+                if (repeater[i].tx_busy == 1)
+                {
+
+                        out << "\"icon\" : \"http://maps.google.com/mapfiles/ms/icons/red-dot.png\"," << std::endl;
+
+                        out << "\"contentstr\" : \"<p>TX TG: <b>" << repeater[i].busy_tg << "</b><br/>TX Timer: <b>"
+                                 << repeater[i].time_since_tx << "<br/><b/>UID: <b>" << repeater[i].tx_uid << "</b></p>\" " << std::endl;
+			continue;
+
+                }
+
+                out << " }," << std::endl;
+        }
+        out << " ];" << std::endl;
+
+        out.close();
+
+
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -517,7 +580,7 @@ int main(int argc, char *argv[])
 
                 repeater[i].tac_list = (unsigned int *)calloc(tg_elems.size()+1,sizeof(int));
                 std::cout << "Tactical Talkgroups " << tg_elems.size() << std::endl;
-                std::cout << "Repeater " << i << "  Tactical Talkgroups: ";
+                std::cout << "Repeater " << i << "  Tactical Talkgroup List: ";
 
                 for(j = 0; j < tg_elems.size(); j++)
                 {
@@ -555,16 +618,28 @@ int main(int argc, char *argv[])
 		return 1; 
 	}
 
+	int counter = 0;
+
 	while(1==1)
 	{
-		sleep(900);
-		for(i = 0; i < repeater_count; i++)
-		{
- 			if(getaddrinfo(repeater[i].hostname, NULL, NULL, &result) == 0)
-                	{
-                        	repeater[i].rpt_addr_00.sin_addr.s_addr = ((struct sockaddr_in *)(result->ai_addr))->sin_addr.s_addr;
-                	}
-		}
+		sleep(10);
+                counter++;
+
+                // Write out the map json data
+
+                write_map();
+
+                if (counter > 90)
+                {
+                        for (i = 0; i < repeater_count; i++)
+                        {
+                                if(getaddrinfo(repeater[i].hostname, NULL, &hints, &result) == 0)
+                                {
+                                        repeater[i].rpt_addr_00.sin_addr.s_addr = ((struct sockaddr_in *)(result->ai_addr))->sin_addr.s_addr;
+                                }
+                        }
+                counter = 0;
+                }
 
 	}
 	pthread_exit(NULL);
