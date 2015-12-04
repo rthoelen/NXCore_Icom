@@ -56,7 +56,7 @@ struct rpt {
 
 } *repeater;
 
-char version[] = "NXCORE Manager, ICOM, version 1.1.1";
+char version[] = "NXCORE Manager, ICOM, version 1.2";
 char copyright[] = "Copyright (C) Robert Thoelen, 2015";
 
 
@@ -420,11 +420,11 @@ void *timing_thread(void *t_id)
 	
 }
 
-void write_map(void)
+void write_map(char *mfile)
 {
         int i;
 
-        std::ofstream out("/usr/local/www/nginx/status-ic.json");
+        std::ofstream out(mfile);
 
         // Write the preamble
 
@@ -446,6 +446,7 @@ void write_map(void)
                         out << "\"contentstr\" : \"<p>RX TG: <b>" << repeater[i].active_tg << "</b><br/>RX Timer: <b>"
                                  << repeater[i].time_since_rx << "<b/><br/>UID: <b>" << repeater[i].uid << "</b></p>\" " << std::endl;
 
+                	out << " }," << std::endl;
 			continue;
                 }
 
@@ -454,6 +455,7 @@ void write_map(void)
                         out << "\"icon\" : \"http://maps.google.com/mapfiles/ms/icons/green-dot.png\"," << std::endl;
 
                         out << "\"contentstr\" : \"<p>Repeater IDLE</p>\"  " << std::endl;
+                	out << " }," << std::endl;
 			continue;	
                 }
 
@@ -464,11 +466,11 @@ void write_map(void)
 
                         out << "\"contentstr\" : \"<p>TX TG: <b>" << repeater[i].busy_tg << "</b><br/>TX Timer: <b>"
                                  << repeater[i].time_since_tx << "<br/><b/>UID: <b>" << repeater[i].tx_uid << "</b></p>\" " << std::endl;
+                	out << " }," << std::endl;
 			continue;
 
                 }
 
-                out << " }," << std::endl;
         }
         out << " ];" << std::endl;
 
@@ -481,6 +483,9 @@ void write_map(void)
 int main(int argc, char *argv[])
 {
     int i, j, len;
+	char *mapfile;
+	std::string mfile;
+	int mapflag;
 
 	struct addrinfo hints, *result;
 	boost::property_tree::ptree pt;
@@ -516,7 +521,34 @@ int main(int argc, char *argv[])
 
 	repeater = (struct rpt *)calloc(repeater_count, sizeof(struct rpt));
 
-	/* For Icom we don't need this
+        // Check for if we need to output a JSON file for Google Maps
+
+        try {
+        mfile = pt.get<std::string>("mapfile");
+        }
+        catch(const boost::property_tree::ptree_error  &e)
+        {
+                std::cout << "mapfile= property not found in NXCore.ini" << std::endl <<
+std::endl;
+                exit(1);
+        }
+
+
+        if(mfile.size() !=0)
+        {
+                std::cout << "Turning on map data" << std::endl << std::endl;
+                mapfile = (char *)calloc(1,mfile.size()+1);
+                memcpy(mapfile, (char *)mfile.c_str(),mfile.size()+1);
+                mapflag = 1;
+        }
+        else
+        {
+                std::cout << "Map data turned off" << std::endl << std::endl;
+                mapflag = 0;
+        }
+
+
+	/* For Icom we don't need this (at least yet)
 
 	unsigned int tempaddr;
 
@@ -569,6 +601,9 @@ int main(int argc, char *argv[])
 			std::cout << " " << repeater[i].tg_list[j];
 
 		}
+
+
+		std::cout << std::endl;
 
 	        // Do the same for the tactical list
 
@@ -626,8 +661,8 @@ int main(int argc, char *argv[])
                 counter++;
 
                 // Write out the map json data
-
-                write_map();
+		if(mapflag)
+                	write_map(mapfile);
 
                 if (counter > 90)
                 {
