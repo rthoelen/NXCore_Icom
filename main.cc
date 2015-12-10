@@ -43,8 +43,8 @@ struct rpt {
 	int rx_activity;     // flag to show activity
 	int tx_busy;
 	unsigned int busy_tg;
-	unsigned char local_ran; // RAN for local operations
-	unsigned char ran;	
+	unsigned char tx_ran;	
+	unsigned char rx_ran;	
 	unsigned int active_tg; // talkgroup currently active
 	unsigned int last_tg;  // used for talk group hold time
 	unsigned int *tg_list;   // if a talkgroup isn't in this list, it isn't repeated
@@ -101,7 +101,7 @@ void *listen_thread(void *thread_id)
 	int strt_packet;
 
 	struct sockaddr_in tport;
-	int GID, UID;
+	int GID, UID, RAN;
 	int i;
 
         /* create UDP socket for repeaters */
@@ -165,7 +165,7 @@ void *listen_thread(void *thread_id)
 		if (recvlen != 102)
 			continue;
 
-                if ((buf[38] == 0x1c) && (buf[39] == 0x21)) {
+                if ((buf[38] == 0x1c) && (buf[39] == 0x21) && ((buf[40] == 0x81)||(buf[40] == 0x83))) {
                         buf[recvlen] = 0;
 
 			rpt_id = get_repeater_id(&remaddr);
@@ -176,23 +176,73 @@ void *listen_thread(void *thread_id)
 			}
 
 
+			GID = (buf[50] << 8) + buf[51];
+			UID = (buf[48] << 8) + buf[49];
+			RAN = buf[41];
+
 			if(buf[45] == (char)1) // Beginning of packets
 			{
 				repeater[rpt_id].rx_activity = 1;
-				GID = (buf[50] << 8) + buf[51];
-				UID = (buf[48] << 8) + buf[49];
+
+                                if (RAN != repeater[rpt_id].rx_ran)
+                                {
+                                        std::cout << "Repeater " << rpt_id
+                                                << " not passing start from UID: " << UID
+                                                << " from TG: " << GID
+                                                << " because RAN: " << RAN
+                                                << " isn't the receive RAN" << std::endl;
+					sendto(socket_00, buf, recvlen, 0, (struct sockaddr *)&tport,
+		 				sizeof(tport));
+
+					// Handle special case of alternate RAN for local communications
+					// and block network activity
+					if (GID == 0)
+                                        {
+                                                repeater[rpt_id].rx_activity = 1;
+                                                repeater[rpt_id].time_since_rx = 0;
+                                                repeater[rpt_id].active_tg = GID;
+                                        }
+
+                                        continue;
+                                }
+
 				repeater[rpt_id].uid = UID;
 				repeater[rpt_id].active_tg = GID;
 				repeater[rpt_id].busy_tg = GID;
 				strt_packet=1;
-				std::cout << "Repeater " << rpt_id << " receiving start from UID: " << UID << " from TG: " << GID << std::endl;
+				std::cout << "Repeater " << rpt_id
+					<< " receiving start from UID: " << UID
+					<< " from TG: " << GID 
+					<< " on RAN: " << RAN << std::endl;
 			}
 		
 			if(buf[45] == (char)8) // End, sent shutdown on 64001	
 			{
+                                if (RAN != repeater[rpt_id].rx_ran)
+                                {
+                                        std::cout << "Repeater " << rpt_id
+                                                << " not passing start from UID: " << UID
+                                                << " from TG: " << GID
+                                                << " because RAN: " << RAN
+                                                << " isn't the receive RAN" << std::endl;
+					sendto(socket_00, buf, recvlen, 0, (struct sockaddr *)&tport,
+		 				sizeof(tport));
+
+					// Handle special case of alternate RAN for local communications
+					// and block network activity
+                                	if (GID == 0)
+                                	{ 
+						repeater[rpt_id].rx_activity = 0;
+						repeater[rpt_id].time_since_rx = 0;
+						repeater[rpt_id].last_tg = repeater[rpt_id].active_tg;
+					}
+
+					continue;
+		
+                                }
 				repeater[rpt_id].rx_activity = 0;    // Activity on channel is over
 				repeater[rpt_id].last_tg = repeater[rpt_id].active_tg;
-				GID = repeater[rpt_id].active_tg;
+ 
 				std::cout << "Repeater " << rpt_id << " receiving stop from UID: " << UID << " from TG: " << GID << std::endl;	
 			}	
 				
@@ -341,7 +391,7 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 			// Drop in the ran code
 			if ((buf[38] == 0x1c) && (buf[40] == 0x81))
 			{
-				buf[41] = (char)repeater[i].ran;
+				buf[41] = (char)repeater[i].tx_ran;
 			}
 			
 			if (strt_packet)
@@ -627,7 +677,8 @@ std::endl;
 
 
 		std::cout << std::endl << std::endl;
-		repeater[i].ran = pt.get<int>(elems[i] + ".ran");
+		repeater[i].tx_ran = pt.get<int>(elems[i] + ".tx_ran");
+		repeater[i].rx_ran = pt.get<int>(elems[i] + ".rx_ran");
 		repeater[i].hold_time = pt.get<int>(elems[i] + ".rx_hold_time");
 		repeater[i].time_since_rx = repeater[i].hold_time;
 		repeater[i].tx_hold_time = pt.get<int>(elems[i] + ".tx_hold_time");
