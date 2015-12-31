@@ -176,12 +176,12 @@ void *listen_thread(void *thread_id)
 			}
 
 
-			GID = (buf[50] << 8) + buf[51];
-			UID = (buf[48] << 8) + buf[49];
-			RAN = buf[41];
-
 			if(buf[45] == (char)1) // Beginning of packets
 			{
+				GID = (buf[50] << 8) + buf[51];
+				UID = (buf[48] << 8) + buf[49];
+				RAN = buf[41];
+
 				repeater[rpt_id].rx_activity = 1;
 
                                 if (RAN != repeater[rpt_id].rx_ran)
@@ -193,6 +193,8 @@ void *listen_thread(void *thread_id)
                                                 << " isn't the receive RAN" << std::endl;
 					sendto(socket_00, buf, recvlen, 0, (struct sockaddr *)&tport,
 		 				sizeof(tport));
+
+					repeater[rpt_id].rx_activity = 0;
 
 					// Handle special case of alternate RAN for local communications
 					// and block network activity
@@ -218,6 +220,9 @@ void *listen_thread(void *thread_id)
 		
 			if(buf[45] == (char)8) // End, sent shutdown on 64001	
 			{
+				GID = (buf[50] << 8) + buf[51];
+				UID = (buf[48] << 8) + buf[49];
+				RAN = buf[41];
                                 if (RAN != repeater[rpt_id].rx_ran)
                                 {
                                         std::cout << "Repeater " << rpt_id
@@ -246,6 +251,8 @@ void *listen_thread(void *thread_id)
 				std::cout << "Repeater " << rpt_id << " receiving stop from UID: " << UID << " from TG: " << GID << std::endl;	
 			}	
 				
+			if((buf[45] != 8)&&(repeater[rpt_id].rx_activity == 0))
+				continue;
 			repeater[rpt_id].time_since_rx = 0;
 			// send packet to repeaters
 			snd_packet(buf, recvlen, GID, rpt_id, strt_packet);
