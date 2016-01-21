@@ -56,7 +56,7 @@ struct rpt {
 
 } *repeater;
 
-char version[] = "NXCORE Manager, ICOM, version 1.2";
+char version[] = "NXCORE Manager, ICOM, version 1.3";
 char copyright[] = "Copyright (C) Robert Thoelen, 2015";
 
 
@@ -99,6 +99,7 @@ void *listen_thread(void *thread_id)
         socklen_t addrlen = sizeof(remaddr);            /* length of addresses */
         int recvlen;                    /* # bytes received */
         unsigned char buf[105];     /* receive buffer */
+        unsigned char tempbuf[105];     /* receive buffer for test port packet */
 	struct hostent *he;
 	int rpt_id;
 	int strt_packet;
@@ -168,15 +169,22 @@ void *listen_thread(void *thread_id)
 		if (recvlen != 102)
 			continue;
 
+		rpt_id = get_repeater_id(&remaddr);
+		if (rpt_id == -1)
+		{
+			std::cout << "Unauthorized repeater, " << inet_ntoa(remaddr.sin_addr) << ", dropping packet" << std::endl;
+			continue;  // Throw out packet, not in our list
+		}
+
+		memcpy(tempbuf,buf,102);
+
+		tempbuf[97] = (repeater[rpt_id].rpt_addr_00.sin_addr.s_addr) >> 24;
+                tempbuf[98] = ((repeater[rpt_id].rpt_addr_00.sin_addr.s_addr) >> 16) & 0xff;
+                tempbuf[99] = ((repeater[rpt_id].rpt_addr_00.sin_addr.s_addr) >> 8) & 0xff;
+                tempbuf[100] = (repeater[rpt_id].rpt_addr_00.sin_addr.s_addr) & 0xff;
+
                 if ((buf[38] == 0x1c) && (buf[39] == 0x21) && ((buf[40] == 0x81)||(buf[40] == 0x83))) {
                         buf[recvlen] = 0;
-
-			rpt_id = get_repeater_id(&remaddr);
-			if (rpt_id == -1)
-			{
-				std::cout << "Unauthorized repeater, " << inet_ntoa(remaddr.sin_addr) << ", dropping packet" << std::endl;
-				continue;  // Throw out packet, not in our list
-			}
 
 
 			if(buf[45] == (char)1) // Beginning of packets
@@ -196,7 +204,7 @@ void *listen_thread(void *thread_id)
                                                 	<< " because RAN: " << RAN
                                                 	<< " isn't the receive RAN" << std::endl;
 
-					sendto(socket_00, buf, recvlen, 0, (struct sockaddr *)&tport,
+					sendto(socket_00, tempbuf, recvlen, 0, (struct sockaddr *)&tport,
 		 				sizeof(tport));
 
 					repeater[rpt_id].rx_activity = 0;
@@ -228,6 +236,14 @@ void *listen_thread(void *thread_id)
 				GID = (buf[50] << 8) + buf[51];
 				UID = (buf[48] << 8) + buf[49];
 				RAN = buf[41];
+
+
+				if ((UID == 0) && (GID == 0))
+					continue;
+
+				if (repeater[rpt_id].rx_activity == 0)
+					continue;
+
                                 if (RAN != repeater[rpt_id].rx_ran)
                                 {
 					if(debug)
@@ -237,7 +253,7 @@ void *listen_thread(void *thread_id)
                                                 	<< " because RAN: " << RAN
                                                 	<< " isn't the receive RAN" << std::endl;
 
-					sendto(socket_00, buf, recvlen, 0, (struct sockaddr *)&tport,
+					sendto(socket_00, tempbuf, recvlen, 0, (struct sockaddr *)&tport,
 		 				sizeof(tport));
 
 					// Handle special case of alternate RAN for local communications
@@ -264,16 +280,13 @@ void *listen_thread(void *thread_id)
 			// send packet to repeaters
 			snd_packet(buf, recvlen, GID, rpt_id, strt_packet);
 			strt_packet = 0;
-			sendto(socket_00, buf, recvlen, 0, (struct sockaddr *)&tport,
+			sendto(socket_00, tempbuf, recvlen, 0, (struct sockaddr *)&tport,
 		 		sizeof(tport));
 				
 		}
                else
 		if (((buf[38] == 0x00)||(buf[38] == 0x10)) && (buf[39] == 0x21)) { 
 
-			rpt_id = get_repeater_id(&remaddr);
-			if (rpt_id == -1)
-				continue;  // Throw out packet, not in our list
 			
 			if (repeater[rpt_id].rx_activity == 0)
 				continue;
@@ -285,7 +298,7 @@ void *listen_thread(void *thread_id)
 			// send packet to repeaters that can receive it
 			snd_packet(buf, recvlen, GID, rpt_id, 0);
 
-			sendto(socket_00, buf, recvlen, 0, (struct sockaddr *)&tport,
+			sendto(socket_00, tempbuf, recvlen, 0, (struct sockaddr *)&tport,
 		 		sizeof(tport));
 		}
 		
