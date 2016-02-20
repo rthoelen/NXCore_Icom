@@ -56,8 +56,8 @@ struct rpt {
 
 } *repeater;
 
-char version[] = "NXCORE Manager, ICOM, version 1.3";
-char copyright[] = "Copyright (C) Robert Thoelen, 2015";
+char version[] = "NXCORE Manager, ICOM, version 1.3.1";
+char copyright[] = "Copyright (C) Robert Thoelen, 2015-2016";
 
 
 void snd_packet(unsigned char [], int, int,int, int);
@@ -71,6 +71,8 @@ int repeater_count;
 int debug = 0;
 
 int socket_00;   // Sockets we use
+
+int tx_busy_sem;
 
 
 // See if incoming packet address matches a repeater.  If it does,
@@ -427,7 +429,9 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 			
 			if (strt_packet)
 			{
+				tx_busy_sem = 1;
 				repeater[i].tx_busy = 1;
+				tx_busy_sem = 0;
 				repeater[i].busy_tg = GID;
 			}
 
@@ -477,6 +481,8 @@ void *timing_thread(void *t_id)
 				repeater[i].rx_activity = 0;
 			}
 
+			while(tx_busy_sem == 1)
+				usleep(1);
 			if(repeater[i].time_since_tx > repeater[i].tx_hold_time)
 			{
 				repeater[i].time_since_tx = repeater[i].tx_hold_time;
@@ -645,6 +651,8 @@ std::endl;
 	tempaddr = inet_addr(pt.get<std::string>("nodeip").c_str());
 
 	*/
+
+	tx_busy_sem = 0;
 
 	// Start populating structure
 	std::string key;
