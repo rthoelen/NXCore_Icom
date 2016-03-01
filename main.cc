@@ -387,6 +387,10 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 		{
 
 
+			if(repeater[i].disable)
+				continue;
+
+
 			// Check if this is an OTAA packet
 
                 	if ((buf[38] == 0x1c) && (buf[39] == 0x21) && (buf[40] == 0xa0) && (repeater[i].tx_otaa == 0)) {
