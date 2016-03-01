@@ -1,6 +1,6 @@
 /*
 
-Copyright (C) 2015 Robert Thoelen
+Copyright (C) 2015-2016 Robert Thoelen
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -53,10 +53,13 @@ struct rpt {
 	int tx_uid; // UID during transmit
 	int stealth; // true if keep alive needed
 	int tx_otaa; // flag for sending OTAA or blocking
+	int disable;
+	int tg_network_on;
+	int tg_network_off;
 
 } *repeater;
 
-char version[] = "NXCORE Manager, ICOM, version 1.3.1";
+char version[] = "NXCORE Manager, ICOM, version 1.3.2";
 char copyright[] = "Copyright (C) Robert Thoelen, 2015-2016";
 
 
@@ -197,6 +200,20 @@ void *listen_thread(void *thread_id)
 
 				repeater[rpt_id].rx_activity = 1;
 
+				if ((repeater[rpt_id].tg_network_off == GID) && (repeater[rpt_id].tg_network_off != 0))
+				{
+					repeater[rpt_id].disable = 1;
+					std::cout << "Repeater  ->" << r_list[rpt_id]
+						<< "disabled due to TG: " << GID << std::endl;
+				}
+
+				if ((repeater[rpt_id].tg_network_on == GID) && (repeater[rpt_id].tg_network_on != 0))
+				{
+					repeater[rpt_id].disable = 0;
+					std::cout << "Repeater  ->" << r_list[rpt_id]
+						<< "enabled due to TG: " << GID << std::endl;
+				}	
+
                                 if (RAN != repeater[rpt_id].rx_ran)
                                 {
 					if(debug)
@@ -278,6 +295,10 @@ void *listen_thread(void *thread_id)
 				
 			if((buf[45] != 8)&&(repeater[rpt_id].rx_activity == 0))
 				continue;
+
+			if(repeater[rpt_id].disable)
+				continue;
+
 			repeater[rpt_id].time_since_rx = 0;
 			// send packet to repeaters
 			snd_packet(buf, recvlen, GID, rpt_id, strt_packet);
@@ -289,6 +310,9 @@ void *listen_thread(void *thread_id)
                else
 		if (((buf[38] == 0x00)||(buf[38] == 0x10)) && (buf[39] == 0x21)) { 
 
+
+			if(repeater[rpt_id].disable)
+				continue;
 			
 			if (repeater[rpt_id].rx_activity == 0)
 				continue;
@@ -735,6 +759,17 @@ std::endl;
 		repeater[i].time_since_tx = repeater[i].tx_hold_time;
 		repeater[i].stealth = pt.get<int>(elems[i] + ".stealth");
 		repeater[i].tx_otaa = pt.get<int>(elems[i] + ".tx_otaa");
+
+		try {
+			repeater[i].tg_network_off = pt.get<int>(elems[i] + ".tg_network_off");
+			repeater[i].tg_network_on = pt.get<int>(elems[i] + ".tg_network_on");
+		}
+		catch(const boost::property_tree::ptree_error &e)
+		{
+			repeater[i].tg_network_off = 0;
+			repeater[i].tg_network_on = 0;
+		}	
+		
 
 	}
 
