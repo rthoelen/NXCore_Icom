@@ -32,6 +32,8 @@ limitations under the License.
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <sys/ioctl.h>
+#include <linux/sockios.h>
 
 struct rpt {
 	struct sockaddr_in rpt_addr_00; // socket address for 41300
@@ -366,6 +368,7 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 	int tg;
 	int tac_flag;
 	in_addr_t tmp_addr;
+	int o_bufsize;
 
 	if (tg_lookup(GID, rpt_id) == -1)
 	{
@@ -409,8 +412,8 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 
 			// If there is RX activity on this repeater, don't send to the repeater
 
-			if(repeater[i].rx_activity == 1)
-				continue;
+			// if(repeater[i].rx_activity == 1)
+			//	continue;
 
 
 			// First, if this particular repeater just had RX activity, if the packet 
@@ -470,6 +473,14 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 
 			sendto(socket_00, buf, recvlen, 0, (struct sockaddr *)&repeater[i].rpt_addr_00,
 		 		sizeof(repeater[i].rpt_addr_00));
+
+			while(1)
+			{
+				ioctl(socket_00,SIOCOUTQ, &o_bufsize);
+				if(o_bufsize == 0)
+					break;
+				usleep(250);
+			}
 
 		}
 	}
