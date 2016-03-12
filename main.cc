@@ -714,7 +714,6 @@ std::endl;
                         std::cout << "Error resolving " << pt.get<std::string>(key) << ", exiting" << std::endl;
                         exit(1);
                 }
-
                 repeater[i].rpt_addr_00.sin_addr.s_addr = ((struct sockaddr_in *)(result->ai_addr))->sin_addr.s_addr;
 		repeater[i].rpt_addr_00.sin_family = AF_INET;
 		repeater[i].rpt_addr_00.sin_port = htons(41300);
@@ -722,6 +721,7 @@ std::endl;
 		std::cout << std::endl << std::endl;
 		std::cout << "Repeater " << elems[i] << " address: " << inet_ntoa(repeater[i].rpt_addr_00.sin_addr) << std::endl << std::endl;
 
+		freeaddrinfo(result);
 		// Parse out the talkgroups
 
 		key.assign(elems[i]);
@@ -824,6 +824,7 @@ std::endl;
                                         repeater[i].rpt_addr_00.sin_addr.s_addr = ((struct sockaddr_in *)(result->ai_addr))->sin_addr.s_addr;
                                 }
                         }
+		freeaddrinfo(result);
                 counter = 0;
                 }
 
