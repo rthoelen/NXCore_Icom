@@ -33,7 +33,10 @@ limitations under the License.
 #include <netinet/in.h>
 #include <netdb.h>
 #include <sys/ioctl.h>
+
+#ifdef __linux__
 #include <linux/sockios.h>
+#endif
 
 struct rpt {
 	struct sockaddr_in rpt_addr_00; // socket address for 41300
@@ -61,7 +64,7 @@ struct rpt {
 
 } *repeater;
 
-char version[] = "NXCORE Manager, ICOM, version 1.3.2";
+char version[] = "NXCORE Manager, ICOM, version 1.3.2a";
 char copyright[] = "Copyright (C) Robert Thoelen, 2015-2016";
 
 
@@ -476,7 +479,11 @@ void snd_packet(unsigned char buf[], int recvlen, int GID, int rpt_id, int strt_
 
 			while(1)
 			{
+				#ifdef __FreeBSD__
+				ioctl(socket_00,FIONWRITE, &o_bufsize);
+				#else
 				ioctl(socket_00,SIOCOUTQ, &o_bufsize);
+				#endif
 				if(o_bufsize == 0)
 					break;
 				usleep(250);
