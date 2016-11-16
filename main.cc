@@ -829,9 +829,9 @@ std::endl;
                                 if(getaddrinfo(repeater[i].hostname, NULL, &hints, &result) == 0)
                                 {
                                         repeater[i].rpt_addr_00.sin_addr.s_addr = ((struct sockaddr_in *)(result->ai_addr))->sin_addr.s_addr;
+					freeaddrinfo(result);
                                 }
                         }
-		freeaddrinfo(result);
                 counter = 0;
                 }
 
