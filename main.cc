@@ -61,11 +61,12 @@ struct rpt {
 	int disable;
 	int tg_network_on;
 	int tg_network_off;
+	int msg_flag;
 
 } *repeater;
 
-char version[] = "NXCORE Manager, ICOM, version 1.3.2a";
-char copyright[] = "Copyright (C) Robert Thoelen, 2015-2016";
+char version[] = "NXCORE Manager, ICOM, version 1.4.0";
+char copyright[] = "Copyright (C) Robert Thoelen, 2015-2020";
 
 
 void snd_packet(unsigned char [], int, int,int, int);
@@ -332,8 +333,86 @@ void *listen_thread(void *thread_id)
 			sendto(socket_00, tempbuf, recvlen, 0, (struct sockaddr *)&tport,
 		 		sizeof(tport));
 		}
+
+	       // Code for group call + SDM
+	       //
+	       // start packet
+	       if ((buf[39]==0x18)&&(buf[42]==0x0f)&&(repeater[rpt_id].disable==0))
+	       {
+
+			GID = (buf[47] << 8) + buf[48];
+			UID = (buf[45] << 8) + buf[46];
+			RAN = buf[41];
+			repeater[rpt_id].uid = UID;
+			repeater[rpt_id].active_tg = GID;
+			repeater[rpt_id].busy_tg = GID;
+			repeater[rpt_id].rx_activity = 1;
+			strt_packet=1;
+			std::cout << "Repeater  ->" << r_list[rpt_id]
+				<< "<-  receiving message start from UID: " << UID
+				<< " from TG: " << GID 
+				<< " on RAN: " << RAN << std::endl;
+
+			// send packet to repeaters that can receive it
+			snd_packet(buf, recvlen, GID, rpt_id, 0);
+
+			sendto(socket_00, tempbuf, recvlen, 0, (struct sockaddr *)&tport,
+		 		sizeof(tport));
+	       }
+
+
+	       // stop packet for group SDM
 		
-        }	
+	       if ((buf[39]==0x18)&&(buf[42]==0x08)&&(repeater[rpt_id].disable==0))
+	       {
+
+			GID = (buf[47] << 8) + buf[48];
+			UID = (buf[45] << 8) + buf[46];
+			repeater[rpt_id].uid = UID;
+			repeater[rpt_id].active_tg = GID;
+			repeater[rpt_id].busy_tg = GID;
+
+			repeater[rpt_id].rx_activity = 0;    // Activity on channel is over
+			repeater[rpt_id].last_tg = repeater[rpt_id].active_tg;
+
+			std::cout << "Repeater  ->" << r_list[rpt_id]
+				<< "<-  receiving message stop from UID: " << UID
+				<< " from TG: " << GID 
+				<< " on RAN: " << RAN << std::endl;
+
+
+			// send packet to repeaters that can receive it
+			snd_packet(buf, recvlen, GID, rpt_id, 0);
+
+			sendto(socket_00, tempbuf, recvlen, 0, (struct sockaddr *)&tport,
+		 		sizeof(tport));
+	       }
+
+	       // datagram
+
+		if ((buf[39] == 0x18)&&(buf[40]==0x9c)) { 
+
+			if(repeater[rpt_id].disable)
+				continue;
+			
+			if (repeater[rpt_id].rx_activity == 0)
+				continue;
+
+			GID = repeater[rpt_id].active_tg;
+
+			repeater[rpt_id].time_since_rx = 0;
+
+			// send packet to repeaters that can receive it
+			snd_packet(buf, recvlen, GID, rpt_id, 0);
+
+			sendto(socket_00, tempbuf, recvlen, 0, (struct sockaddr *)&tport,
+		 		sizeof(tport));
+
+
+		}
+
+	}
+        	
 }
 
 int tg_lookup(int GID, int i)
@@ -554,72 +633,10 @@ void *timing_thread(void *t_id)
 	
 }
 
-void write_map(char *mfile)
-{
-        int i;
-
-        std::ofstream out(mfile);
-
-        // Write the preamble
-
-        out << " var json1 = [ " << std::endl;
-
-        for( i = 0; i < repeater_count; i++)
-        {
-                out << " { " << std::endl;
-                // Determine what state we are in:
-
-                // Green: IDLE
-                // Red: TX
-                // Blue: RX
-
-                if (repeater[i].rx_activity == 1)
-                {
-                        out << "\"icon\" : \"http://maps.google.com/mapfiles/ms/icons/blue-dot.png\"," << std::endl;
-
-                        out << "\"contentstr\" : \"<p>RX TG: <b>" << repeater[i].active_tg << "</b><br/>RX Timer: <b>"
-                                 << repeater[i].time_since_rx << "<b/><br/>UID: <b>" << repeater[i].uid << "</b></p>\" " << std::endl;
-
-                	out << " }," << std::endl;
-			continue;
-                }
-
-                if ((repeater[i].rx_activity == 0)&&(repeater[i].tx_busy == 0))
-                {
-                        out << "\"icon\" : \"http://maps.google.com/mapfiles/ms/icons/green-dot.png\"," << std::endl;
-
-                        out << "\"contentstr\" : \"<p>Repeater IDLE</p>\"  " << std::endl;
-                	out << " }," << std::endl;
-			continue;	
-                }
-
-                if (repeater[i].tx_busy == 1)
-                {
-
-                        out << "\"icon\" : \"http://maps.google.com/mapfiles/ms/icons/red-dot.png\"," << std::endl;
-
-                        out << "\"contentstr\" : \"<p>TX TG: <b>" << repeater[i].busy_tg << "</b><br/>TX Timer: <b>"
-                                 << repeater[i].time_since_tx << "<br/><b/>UID: <b>" << repeater[i].tx_uid << "</b></p>\" " << std::endl;
-                	out << " }," << std::endl;
-			continue;
-
-                }
-
-        }
-        out << " ];" << std::endl;
-
-        out.close();
-
-
-}
-
 
 int main(int argc, char *argv[])
 {
     int i, j, len;
-	char *mapfile;
-	std::string mfile;
-	int mapflag;
 
 	struct addrinfo hints, *result;
 	boost::property_tree::ptree pt;
@@ -662,32 +679,6 @@ int main(int argc, char *argv[])
 	std::cout << "Repeater Count:  " << repeater_count << std::endl << std::endl;
 
 	repeater = (struct rpt *)calloc(repeater_count, sizeof(struct rpt));
-
-        // Check for if we need to output a JSON file for Google Maps
-
-        try {
-        mfile = pt.get<std::string>("mapfile");
-        }
-        catch(const boost::property_tree::ptree_error  &e)
-        {
-                std::cout << "mapfile= property not found in NXCore.ini" << std::endl <<
-std::endl;
-                exit(1);
-        }
-
-
-        if(mfile.size() !=0)
-        {
-                std::cout << "Turning on map data" << std::endl << std::endl;
-                mapfile = (char *)calloc(1,mfile.size()+1);
-                memcpy(mapfile, (char *)mfile.c_str(),mfile.size()+1);
-                mapflag = 1;
-        }
-        else
-        {
-                std::cout << "Map data turned off" << std::endl << std::endl;
-                mapflag = 0;
-        }
 
 
 	/* For Icom we don't need this (at least yet)
@@ -783,6 +774,14 @@ std::endl;
 		repeater[i].tx_otaa = pt.get<int>(elems[i] + ".tx_otaa");
 
 		try {
+			repeater[i].msg_flag = pt.get<int>(elems[i] + ".msg_flag");
+		}
+		catch(const boost::property_tree::ptree_error &e)
+		{
+			repeater[i].msg_flag = 0;
+		}	
+		
+		try {
 			repeater[i].tg_network_off = pt.get<int>(elems[i] + ".tg_network_off");
 			repeater[i].tg_network_on = pt.get<int>(elems[i] + ".tg_network_on");
 		}
@@ -817,10 +816,6 @@ std::endl;
 	{
 		sleep(10);
                 counter++;
-
-                // Write out the map json data
-		if(mapflag)
-                	write_map(mapfile);
 
                 if (counter > 90)
                 {
