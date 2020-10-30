@@ -337,7 +337,7 @@ void *listen_thread(void *thread_id)
 	       // Code for group call + SDM
 	       //
 	       // start packet
-	       if ((buf[39]==0x18)&&(buf[42]==0x0f)&&(repeater[rpt_id].disable==0))
+	       if ((buf[39]==0x18)&&((buf[42]==0x0f)||(buf[42]==0x09))&&(repeater[rpt_id].disable==0))
 	       {
 
 			GID = (buf[47] << 8) + buf[48];
@@ -386,11 +386,12 @@ void *listen_thread(void *thread_id)
 
 			sendto(socket_00, tempbuf, recvlen, 0, (struct sockaddr *)&tport,
 		 		sizeof(tport));
+
 	       }
 
 	       // datagram
 
-		if ((buf[39] == 0x18)&&(buf[40]==0x9c)) { 
+		if ((buf[39] == 0x18)&&(buf[40]==0x9c)&&(buf[42]==0x0b)) { 
 
 			if(repeater[rpt_id].disable)
 				continue;
@@ -401,6 +402,13 @@ void *listen_thread(void *thread_id)
 			GID = repeater[rpt_id].active_tg;
 
 			repeater[rpt_id].time_since_rx = 0;
+
+			std::cout << "Repeater  ->" << r_list[rpt_id]
+				<< "<-  sending message data from UID: " << UID
+				<< " from TG: " << GID 
+				<< " on RAN: " << RAN << std::endl;
+
+
 
 			// send packet to repeaters that can receive it
 			snd_packet(buf, recvlen, GID, rpt_id, 0);
